@@ -1,0 +1,74 @@
+name: Keep MZI Streamlit app awake
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    env:
+      APP_URL: ${{ vars.MZI_STREAMLIT_URL }}
+
+    steps:
+      - name: Check app URL
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "Repository variable MZI_STREAMLIT_URL is not configured."
+            echo "Add it under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          echo "Will wake: $APP_URL"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Wake Streamlit app
+        run: |
+          node <<'EOF'
+          const { chromium } = require('playwright');
+
+          const url = process.env.APP_URL;
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+
+            try {
+              console.log(`Opening ${url}`);
+              await page.goto(url, {
+                waitUntil: 'domcontentloaded',
+                timeout: 60000
+              });
+
+              await page.waitForTimeout(3000);
+
+              const wakeButton = page.getByRole('button', {
+                name: /get this app back up/i
+              });
+
+              if (await wakeButton.count()) {
+                console.log('App is sleeping. Clicking wake button...');
+                await wakeButton.first().click();
+                await page.waitForTimeout(15000);
+                console.log('Wake request sent.');
+              } else {
+                console.log('App appears to already be awake.');
+              }
+            } catch (error) {
+              console.error(`Problem with ${url}:`, error.message);
+              process.exitCode = 1;
+            } finally {
+              await page.close();
+              await browser.close();
+            }
+          })();
+          EOF
