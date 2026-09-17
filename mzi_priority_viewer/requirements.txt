@@ -6,3 +6,4 @@ streamlit-folium>=0.22
 pyproj>=3.6
 shapely>=2.0
 branca>=0.7
+openpyxl>=3.1
