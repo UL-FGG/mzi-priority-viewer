@@ -215,7 +215,7 @@ gdf = gdf_full[map_keep].copy()
 # -----------------------------------------------------------------------------
 # HEADER
 # -----------------------------------------------------------------------------
-col_title, col_logo = st.columns([5.5, 1.5], vertical_alignment="center")
+col_title, col_logo = st.columns([6, 1.7], vertical_alignment="top")
 with col_title:
     st.markdown(
         "<div class='mzi-title'>Končna prioritetna območja za razvoj modro-zelene infrastrukture v Ljubljani</div>",
