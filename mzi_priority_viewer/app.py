@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 from folium.features import GeoJsonPopup, GeoJsonTooltip
 from streamlit_folium import st_folium
+from shapely.geometry import Point
 
 
 # -----------------------------------------------------------------------------
@@ -68,14 +69,14 @@ FIELD_ALIASES = {
     "final_mzi_action_index": "Končni indeks ukrepanja",
     "final_mzi_action_class": "Končni razred",
     "final_mzi_action_typology": "Tipologija",
-    "social_need_index": "Indeks socialne potrebe",
-    "mzi_gap_index_y": "Indeks MZI primanjkljaja",
+    "social_need_index": "Indeks socialno-prostorske potrebe",
+    "mzi_gap_index_y": "Indeks biofizikalnega primanjkljaja MZI",
     "strategic_priority_pre_feasibility_index": "Strateška prioriteta pred izvedljivostjo",
     "heat_hazard_social_index": "Indeks toplotne nevarnosti in socialne izpostavljenosti",
     "green_blue_deficit_index": "Primanjkljaj zelene-modre infrastrukture",
     "population_total": "Prebivalstvo v celici",
-    "tree_cover_300m_pct_y": "Pokrovnost dreves v 300 m (%)",
-    "impervious_300m_pct_y": "Nepropustne površine v 300 m (%)",
+    "tree_cover_300m_pct_y": "Delež drevesnega pokrova v 300 m (%)",
+    "impervious_300m_pct_y": "Delež neprepustnih površin v 300 m (%)",
 }
 
 BASEMAPS = {
@@ -114,7 +115,7 @@ st.markdown(
     <style>
     .block-container {
         max-width: 1500px;
-        padding-top: 1.4rem;
+        padding-top: 4.5rem !important;
         padding-bottom: 2rem;
     }
     .mzi-title {
@@ -182,9 +183,6 @@ def load_data(path: str) -> gpd.GeoDataFrame:
     if gdf.crs is None:
         raise ValueError("Vhodni sloj nima definiranega koordinatnega sistema.")
 
-    keep = [c for c in DISPLAY_FIELDS if c in gdf.columns] + ["geometry"]
-    gdf = gdf[keep].copy()
-
     # Web mapping uses WGS84.
     gdf = gdf.to_crs(epsg=4326)
 
@@ -196,6 +194,7 @@ def load_data(path: str) -> gpd.GeoDataFrame:
         "strategic_priority_pre_feasibility_index",
         "heat_hazard_social_index",
         "green_blue_deficit_index",
+        "population_total",
         "tree_cover_300m_pct_y",
         "impervious_300m_pct_y",
     ]:
@@ -205,7 +204,12 @@ def load_data(path: str) -> gpd.GeoDataFrame:
     return gdf
 
 
-gdf = load_data(str(DATA_PATH))
+# Full source layer is retained for the "Vsi atributi izvornega sloja" tab.
+gdf_full = load_data(str(DATA_PATH))
+
+# Only selected attributes are sent to Folium, so the interactive map stays responsive.
+map_keep = [c for c in DISPLAY_FIELDS if c in gdf_full.columns] + ["geometry"]
+gdf = gdf_full[map_keep].copy()
 
 
 # -----------------------------------------------------------------------------
@@ -214,12 +218,18 @@ gdf = load_data(str(DATA_PATH))
 col_title, col_logo = st.columns([5.5, 1.5], vertical_alignment="center")
 with col_title:
     st.markdown(
-        "<div class='mzi-title'>Končna prioritetna območja za razvoj MZI</div>",
+        "<div class='mzi-title'>Končna prioritetna območja za razvoj modro-zelene infrastrukture v Ljubljani</div>",
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<div class='mzi-subtitle'>Interaktivni prostorski pregledovalnik rezultatov magistrske naloge</div>",
-        unsafe_allow_html=True,
+    """
+    <div class='mzi-subtitle'>
+        Interaktivni prostorski pregledovalnik rezultatov magistrske naloge 
+        <em>Prostorska opredelitev prednostnih območij za razvoj modro-zelene infrastrukture za zmanjševanje urbanega pregrevanja</em>
+        (Magistrski študijski program Prostorsko načrtovanje).
+    </div>
+    """,
+    unsafe_allow_html=True,
     )
 with col_logo:
     if LOGO_PATH.exists():
@@ -363,7 +373,13 @@ st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 # MAP
 # -----------------------------------------------------------------------------
 basemap = BASEMAPS[basemap_name]
-m = folium.Map(tiles=None, control_scale=True, prefer_canvas=True)
+m = folium.Map(
+    location=[46.0569, 14.5058],
+    zoom_start=13,
+    tiles=None,
+    control_scale=True,
+    prefer_canvas=True,
+)
 folium.TileLayer(
     tiles=basemap["tiles"],
     attr=basemap["attr"],
@@ -452,13 +468,6 @@ if search_match is not None:
     sb = search_match.total_bounds
     m.fit_bounds([[sb[1], sb[0]], [sb[3], sb[2]]], padding=(80, 80), max_zoom=18)
     st.success(f"Izbrana celica: **{selected_id}** — {selected_category}")
-elif not filtered.empty:
-    bounds = filtered.total_bounds
-    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(18, 18))
-else:
-    bounds = gdf.total_bounds
-    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(18, 18))
-    st.info("Izberi vsaj eno kategorijo za prikaz celic.")
 
 folium.LayerControl(collapsed=True, position="topright").add_to(m)
 
@@ -471,18 +480,173 @@ map_state = st_folium(
 
 
 # -----------------------------------------------------------------------------
+# SELECTED CELL DETAILS
+# -----------------------------------------------------------------------------
+selected_row = None
+
+# A cell found through the search box takes precedence.
+if search_match is not None:
+    selected_row = search_match.iloc[0]
+
+# Otherwise identify the grid cell from the last click on the map.
+elif map_state and map_state.get("last_object_clicked"):
+    clicked = map_state["last_object_clicked"]
+    lat = clicked.get("lat")
+    lng = clicked.get("lng")
+
+    if lat is not None and lng is not None:
+        click_point = Point(lng, lat)
+        hit = gdf[
+            gdf.geometry.contains(click_point)
+            | gdf.geometry.touches(click_point)
+        ]
+        if not hit.empty:
+            selected_row = hit.iloc[0]
+
+if selected_row is not None:
+    selected_id = str(selected_row.get("cell_id", ""))
+    selected_class = str(selected_row.get("final_mzi_action_class", ""))
+
+    # Retrieve the original feature with all source attributes.
+    full_match = gdf_full[
+        gdf_full["cell_id"].astype(str).str.casefold() == selected_id.casefold()
+    ]
+    full_row = full_match.iloc[0] if not full_match.empty else selected_row
+
+    st.markdown(f"## Izbrana celica: `{selected_id}`")
+    st.caption(f"Končni razred: {selected_class}")
+
+    tab_key, tab_all = st.tabs(
+        ["Ključni kazalniki", "Vsi atributi izvornega sloja"]
+    )
+
+    with tab_key:
+        key_fields = [
+            "cell_id",
+            "final_mzi_action_index",
+            "final_mzi_action_class",
+            "final_mzi_action_typology",
+            "social_need_index",
+            "mzi_gap_index_y",
+            "strategic_priority_pre_feasibility_index",
+            "heat_hazard_social_index",
+            "green_blue_deficit_index",
+            "population_total",
+            "tree_cover_300m_pct_y",
+            "impervious_300m_pct_y",
+        ]
+
+        key_rows = []
+        for field in key_fields:
+            if field not in full_row.index:
+                continue
+
+            value = full_row[field]
+
+            if pd.isna(value):
+                display_value = "—"
+            elif field in {"tree_cover_300m_pct_y", "impervious_300m_pct_y"}:
+                display_value = f"{float(value):.1f} %"
+            elif field == "population_total":
+                display_value = f"{int(round(float(value))):,}"
+            elif isinstance(value, (int, float)):
+                display_value = f"{float(value):.3f}".rstrip("0").rstrip(".")
+            else:
+                display_value = str(value)
+
+            key_rows.append(
+                {
+                    "Kazalnik": FIELD_ALIASES.get(field, field),
+                    "Vrednost": display_value,
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(key_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with tab_all:
+        all_rows = []
+        for field in gdf_full.columns:
+            if field == "geometry":
+                continue
+
+            value = full_row.get(field)
+
+            if pd.isna(value):
+                display_value = "—"
+            elif field in {"tree_cover_300m_pct_y", "impervious_300m_pct_y"}:
+                display_value = f"{float(value):.1f} %"
+            elif isinstance(value, float):
+                display_value = f"{value:.6f}".rstrip("0").rstrip(".")
+            else:
+                display_value = str(value)
+
+            all_rows.append(
+                {
+                    "Atribut": field,
+                    "Vrednost": display_value,
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(all_rows),
+            use_container_width=True,
+            hide_index=True,
+            height=620,
+        )
+
+
+# -----------------------------------------------------------------------------
 # EXPLANATION / FOOTER
 # -----------------------------------------------------------------------------
-with st.expander("O prikazu"):
+with st.expander("O magistrskem delu in interaktivnem prikazu", expanded=True):
     st.markdown(
         """
-        Pregledovalnik prikazuje končno tipologijo prednostnih območij za razvoj MZI
-        na mreži 100 × 100 m. Kategorije je mogoče vklapljati in izklapljati,
-        posamezno celico pa je mogoče poiskati po `cell_id`. Klik na celico odpre
-        ključne kazalnike, ki pojasnjujejo njeno razvrstitev.
+        **Urbano pregrevanje je prostorsko heterogen pojav**, zato najtoplejše površine
+        niso nujno tudi območja z največjo prednostjo za razvoj modro-zelene infrastrukture
+        (MZI). Magistrsko delo na primeru Mestne občine Ljubljana razvija pregleden in
+        ponovljiv prostorski pristop za prepoznavanje območij, kjer se ponavljajoča površinska
+        toplotna obremenitev prekriva z veliko socialno-prostorsko potrebo po ukrepanju in
+        izrazitim biofizikalnim primanjkljajem MZI.
 
-        Interaktivni prikaz je namenjen dopolnitvi statičnih kart magistrske naloge
-        in podrobnejšemu prostorskemu raziskovanju rezultatov.
+        Analiza je izvedena na **mreži 100 × 100 m** in temelji na **174 poletnih satelitskih
+        prizorih Landsat in ECOSTRESS iz obdobja 2018–2025**. Modularni metodološki okvir
+        povezuje veččasovno oceno relativne površinske toplotne nevarnosti (Model 1A),
+        pojasnjevalno-napovedno modeliranje LST z modeloma GAM in LightGBM (Model 1B),
+        socialno-prostorsko potrebo po ukrepanju (Model 2A) ter biofizikalni primanjkljaj MZI
+        (Model 2B). V zaključnem koraku sta socialno-prostorska in biofizikalna razsežnost
+        povezani v končno tipologijo prednostnih območij.
+
+        Interaktivna karta omogoča preklapljanje med končnimi razredi, iskanje posamezne
+        analitične celice ter pregled ključnih kazalnikov in vseh atributov izvornega sloja.
+        Namen prikaza je dopolniti statične karte magistrskega dela ter omogočiti podrobnejše
+        prostorsko raziskovanje rezultatov na ravni posamezne celice.
+
+        > Pri uporabi metodologije na drugi lokaciji bi bilo treba posamezne kazalnike, uteži in odločitvena
+        > pravila prilagoditi lokalnim podatkom in prostorskim razmeram. Osnovno načelo pa
+        > ostaja prenosljivo: prednostnih območij za razvoj MZI ni smiselno določati samo tam,
+        > kjer je površje najtoplejše, temveč predvsem tam, kjer se ponavljajoča toplotna
+        > obremenitev prekriva z veliko socialno-prostorsko potrebo in omejeno hladilno ponudbo
+        > prostora.
+        """
+    )
+
+with st.expander("Kako interpretirati končno tipologijo", expanded=False):
+    st.markdown(
+        """
+        Končna prioritizacija ni zasnovana kot preprosto kartiranje najtoplejših delov mesta.
+        Prednost dobijo predvsem območja, kjer se hkrati pojavijo izrazitejša in ponavljajoča
+        površinska toplotna obremenitev, velika socialno-prostorska potreba ter pomanjkanje
+        obstoječih hladilnih elementov MZI.
+
+        **Končna tipologija je strateška podpora prostorskemu načrtovanju in ne neposredna
+        presoja izvedljivosti posameznega ukrepa.** Pred izvedbenim umeščanjem bi bilo treba
+        preveriti še lastništvo zemljišč, namensko rabo prostora, obstoječo in načrtovano
+        infrastrukturo, hidrološke in varstvene pogoje, razpoložljiv prostor ter druge lokalne
+        tehnične in finančne omejitve.
         """
     )
 
