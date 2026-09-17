@@ -226,7 +226,6 @@ with col_title:
     <div class='mzi-subtitle'>
         Interaktivni prostorski pregledovalnik rezultatov magistrske naloge 
         <em>Prostorska opredelitev prednostnih območij za razvoj modro-zelene infrastrukture za zmanjševanje urbanega pregrevanja</em>
-        (Magistrski študijski program Prostorsko načrtovanje).
     </div>
     """,
     unsafe_allow_html=True,
