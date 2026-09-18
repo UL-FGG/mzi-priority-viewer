@@ -763,7 +763,7 @@ st.markdown(
 # DATA
 # -----------------------------------------------------------------------------
 @st.cache_data(show_spinner="Nalaganje prostorskih podatkov …")
-def load_data(path: str) -> gpd.GeoDataFrame:
+def load_data(path: str, file_version: int) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(path)
     if gdf.crs is None:
         raise ValueError("Vhodni sloj nima definiranega koordinatnega sistema.")
@@ -824,7 +824,10 @@ def geocode_ljubljana_address(address: str):
 
 
 # Full source layer is retained for the "Vsi atributi izvornega sloja" tab.
-gdf_full = load_data(str(DATA_PATH))
+gdf_full = load_data(
+    str(DATA_PATH),
+    DATA_PATH.stat().st_mtime_ns,
+)
 
 # Only selected attributes are sent to Folium, so the interactive map stays responsive.
 map_keep = [c for c in DISPLAY_FIELDS if c in gdf_full.columns] + ["geometry"]
