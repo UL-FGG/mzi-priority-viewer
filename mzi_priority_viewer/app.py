@@ -27,6 +27,7 @@ st.set_page_config(
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "final_mzi_action_priority_aoi_ozje.gpkg"
 LOGO_PATH = BASE_DIR / "UL_FGG-logoVER-RGB_barv.png"
+MZI_LOGO_PATH = BASE_DIR / "mzi_priority_viewer_logo.png"
 
 CATEGORY_ORDER = [
     "ni skupna prioriteta",
@@ -503,6 +504,17 @@ st.markdown(
         padding-top: 1.5rem !important;
     }
 
+    .sidebar-brand {
+        padding: 0.15rem 0.15rem 0.65rem 0.15rem;
+        margin-bottom: 0.35rem;
+        text-align: center;
+    }
+
+    .sidebar-brand img {
+        max-width: 100%;
+        height: auto;
+    }
+
     .sidebar-nav {
         background: linear-gradient(90deg, #DDEEE7 0%, #EAF4F0 100%);
         border: 1px solid #D0E2DA;
@@ -751,7 +763,7 @@ st.markdown(
 # DATA
 # -----------------------------------------------------------------------------
 @st.cache_data(show_spinner="Nalaganje prostorskih podatkov …")
-def load_data(path: str, file_version: int) -> gpd.GeoDataFrame:
+def load_data(path: str) -> gpd.GeoDataFrame:
     gdf = gpd.read_file(path)
     if gdf.crs is None:
         raise ValueError("Vhodni sloj nima definiranega koordinatnega sistema.")
@@ -812,10 +824,7 @@ def geocode_ljubljana_address(address: str):
 
 
 # Full source layer is retained for the "Vsi atributi izvornega sloja" tab.
-gdf_full = load_data(
-    str(DATA_PATH),
-    DATA_PATH.stat().st_mtime_ns,
-)
+gdf_full = load_data(str(DATA_PATH))
 
 # Only selected attributes are sent to Folium, so the interactive map stays responsive.
 map_keep = [c for c in DISPLAY_FIELDS if c in gdf_full.columns] + ["geometry"]
@@ -862,6 +871,12 @@ st.markdown("</div>", unsafe_allow_html=True)
 # SIDEBAR CONTROLS
 # -----------------------------------------------------------------------------
 with st.sidebar:
+    # Projektni logotip MZI Priority Viewer je prikazan na vrhu stranske vrstice.
+    if MZI_LOGO_PATH.exists():
+        st.markdown("<div class='sidebar-brand'>", unsafe_allow_html=True)
+        st.image(str(MZI_LOGO_PATH), use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("<div class='sidebar-nav'>⌂ &nbsp; Pregled</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='sidebar-section-title'>Vnesi naslov</div>", unsafe_allow_html=True)
